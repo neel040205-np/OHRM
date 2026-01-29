@@ -17,6 +17,21 @@ const PayrollSchema = new mongoose.Schema({
     },
     lastProcessed: {
         type: Date
+    },
+    payMonth: {
+        type: String // e.g., "01-2026"
+    },
+    deductions: {
+        type: Number,
+        default: 0
+    },
+    netSalary: {
+        type: Number,
+        default: 0
+    },
+    attendanceDays: {
+        type: Number,
+        default: 0
     }
 });
 

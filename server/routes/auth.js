@@ -93,36 +93,28 @@ router.post('/forgot-password', async (req, res) => {
             return res.status(404).json({ msg: 'User with that email does not exist' });
         }
 
-        // Generate Reset Token
-        const resetToken = crypto.randomBytes(20).toString('hex');
+        // Generate 6-digit OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-        // Hash token and save to database
-        user.resetPasswordToken = crypto
-            .createHash('sha256')
-            .update(resetToken)
-            .digest('hex');
-
-        // Set expire time (e.g., 10 minutes)
-        user.resetPasswordExpires = Date.now() + 10 * 60 * 1000;
+        // Save OTP to database (hashed or plain - for simplicity plain here or hashed if preferred security, let's keep it simple string for now as per plan? The plan didn't specify hashing OTP but usually good practice. However, 6 digits are short. Let's store as string for now to match simplicity of user request "confirmation".)
+        user.resetPasswordOtp = otp;
+        user.resetPasswordExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
 
         await user.save();
 
-        // Create reset URL
-        const resetUrl = `http://localhost:5173/reset-password/${resetToken}`;
-
-        const message = `You are receiving this email because you (or someone else) has requested the reset of a password. Please make a PUT request to: \n\n ${resetUrl}`;
+        const message = `Your password reset code is: ${otp}\n\nThis code will expire in 10 minutes.`;
 
         try {
             await sendEmail({
                 email: user.email,
-                subject: 'Password Reset Token',
+                subject: 'Password Reset OTP',
                 message
             });
 
             res.status(200).json({ success: true, data: 'Email sent' });
         } catch (err) {
             console.error(err);
-            user.resetPasswordToken = undefined;
+            user.resetPasswordOtp = undefined;
             user.resetPasswordExpires = undefined;
 
             await user.save();
@@ -136,30 +128,29 @@ router.post('/forgot-password', async (req, res) => {
 });
 
 // Reset Password
-router.put('/reset-password/:resetToken', async (req, res) => {
-    // Get hashed token
-    const resetPasswordToken = crypto
-        .createHash('sha256')
-        .update(req.params.resetToken)
-        .digest('hex');
+router.post('/reset-password', async (req, res) => {
+    const { email, otp, password } = req.body;
 
     try {
         const user = await User.findOne({
-            resetPasswordToken,
+            email,
+            resetPasswordOtp: otp,
             resetPasswordExpires: { $gt: Date.now() }
         });
 
         if (!user) {
-            return res.status(400).json({ msg: 'Invalid Token' });
+            return res.status(400).json({ msg: 'Invalid OTP or Email or OTP Expired' });
         }
 
         // Set new password
         const salt = await bcrypt.genSalt(10);
-        user.password = await bcrypt.hash(req.body.password, salt);
+        user.password = await bcrypt.hash(password, salt);
 
         // Clear reset token fields
-        user.resetPasswordToken = undefined;
+        user.resetPasswordOtp = undefined;
         user.resetPasswordExpires = undefined;
+        // Also clear the old token field if it exists just in case
+        user.resetPasswordToken = undefined;
 
         await user.save();
 

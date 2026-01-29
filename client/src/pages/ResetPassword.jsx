@@ -1,16 +1,25 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 
 import config from '../config';
 
 const ResetPassword = () => {
-    const { token } = useParams();
     const navigate = useNavigate();
+    const location = useLocation();
+
+    const [email, setEmail] = useState('');
+    const [otp, setOtp] = useState('');
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [message, setMessage] = useState('');
     const [error, setError] = useState('');
+
+    useEffect(() => {
+        if (location.state && location.state.email) {
+            setEmail(location.state.email);
+        }
+    }, [location.state]);
 
     const onSubmit = async (e) => {
         e.preventDefault();
@@ -23,7 +32,7 @@ const ResetPassword = () => {
         }
 
         try {
-            await axios.put(`${config.API_URL}/api/auth/reset-password/${token}`, { password });
+            await axios.post(`${config.API_URL}/api/auth/reset-password`, { email, otp, password });
             setMessage('Password reset successful. Redirecting to login...');
             setTimeout(() => {
                 navigate('/');
@@ -40,6 +49,32 @@ const ResetPassword = () => {
                 {message && <p className="p-3 mb-4 text-green-700 bg-green-100 rounded">{message}</p>}
                 {error && <p className="p-3 mb-4 text-red-700 bg-red-100 rounded">{error}</p>}
                 <form onSubmit={onSubmit}>
+                    <div className="mb-4">
+                        <label htmlFor="email" className="block mb-2 text-sm font-bold text-gray-700">
+                            Email Address
+                        </label>
+                        <input
+                            type="email"
+                            id="email"
+                            className="w-full px-3 py-2 leading-tight text-gray-700 border rounded shadow appearance-none focus:outline-none focus:shadow-outline"
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            required
+                        />
+                    </div>
+                    <div className="mb-4">
+                        <label htmlFor="otp" className="block mb-2 text-sm font-bold text-gray-700">
+                            OTP Code
+                        </label>
+                        <input
+                            type="text"
+                            id="otp"
+                            className="w-full px-3 py-2 leading-tight text-gray-700 border rounded shadow appearance-none focus:outline-none focus:shadow-outline"
+                            value={otp}
+                            onChange={(e) => setOtp(e.target.value)}
+                            required
+                        />
+                    </div>
                     <div className="mb-4">
                         <label htmlFor="password" className="block mb-2 text-sm font-bold text-gray-700">
                             New Password

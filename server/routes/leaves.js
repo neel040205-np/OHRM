@@ -12,6 +12,60 @@ const User = require('../models/User');
 router.post('/apply', auth, async (req, res) => {
     try {
         const { leaveType, startDate, endDate, reason } = req.body;
+
+        // Validation: Max 5 leaves per month logic (Robust for cross-month)
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+
+        if (end < start) {
+            return res.status(400).json({ msg: 'End date must be after start date' });
+        }
+
+        // Helper to check quota for specific months involved in this request
+        // We will build a map of { 'Month-Year': count } for the requested leave
+        const requestedPerMonth = {};
+
+        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+            const key = `${d.getMonth()}-${d.getFullYear()}`;
+            requestedPerMonth[key] = (requestedPerMonth[key] || 0) + 1;
+        }
+
+        // For each month involved, check existing leaves + requested
+        for (const [key, count] of Object.entries(requestedPerMonth)) {
+            const [month, year] = key.split('-').map(Number);
+            const startOfMonth = new Date(year, month, 1);
+            const endOfMonth = new Date(year, month + 1, 0);
+
+            // Find existing leaves overlapping this month
+            // Valid overlap: Start <= EndOfMonth AND End >= StartOfMonth
+            const existingLeaves = await Leave.find({
+                user: req.user.id,
+                startDate: { $lte: endOfMonth },
+                endDate: { $gte: startOfMonth },
+                status: { $ne: 'Rejected' },
+                _id: { $ne: req.params.id } // Exclude current if editing (not applicable here but good practice)
+            });
+
+            let takenInThisMonth = 0;
+            existingLeaves.forEach(l => {
+                // Calculate days falling strictly within this month
+                const s = new Date(l.startDate);
+                const e = new Date(l.endDate);
+
+                const overlapStart = s > startOfMonth ? s : startOfMonth;
+                const overlapEnd = e < endOfMonth ? e : endOfMonth;
+
+                if (overlapEnd >= overlapStart) {
+                    const days = (overlapEnd - overlapStart) / (1000 * 60 * 60 * 24) + 1;
+                    takenInThisMonth += days;
+                }
+            });
+
+            if (takenInThisMonth + count > 5) {
+                return res.status(400).json({ msg: `Cannot apply: You exceed the 5-leave limit for ${startOfMonth.toLocaleString('default', { month: 'long' })}.` });
+            }
+        }
+
         const newLeave = new Leave({
             user: req.user.id,
             leaveType,

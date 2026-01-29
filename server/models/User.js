@@ -20,6 +20,7 @@ const UserSchema = new mongoose.Schema({
         default: 'Employee'
     },
     resetPasswordToken: String,
+    resetPasswordOtp: String,
     resetPasswordExpires: Date
 });
 

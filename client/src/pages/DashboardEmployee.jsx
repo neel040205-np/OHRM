@@ -19,6 +19,9 @@ const DashboardEmployee = () => {
     const [message, setMessage] = useState('');
     const [modalOpen, setModalOpen] = useState(false);
     const [selectedImage, setSelectedImage] = useState('');
+    const [leavesTakenThisMonth, setLeavesTakenThisMonth] = useState(0);
+
+    const MAX_LEAVES_PER_MONTH = 5;
 
     useEffect(() => {
         fetchAttendance();
@@ -70,9 +73,37 @@ const DashboardEmployee = () => {
                 headers: { 'x-auth-token': token }
             });
             setLeaves(res.data);
+            calculateMonthlyLeaves(res.data);
         } catch (err) {
             console.error(err);
         }
+    };
+
+    const calculateMonthlyLeaves = (leaveList) => {
+        const now = new Date();
+        const currentMonth = now.getMonth();
+        const currentYear = now.getFullYear();
+        const startOfMonth = new Date(currentYear, currentMonth, 1);
+        const endOfMonth = new Date(currentYear, currentMonth + 1, 0);
+
+        let total = 0;
+        leaveList.forEach(leave => {
+            // Only count Non-Rejected leaves
+            if (leave.status !== 'Rejected') {
+                const start = new Date(leave.startDate);
+                const end = new Date(leave.endDate);
+
+                // Calculate overlap with current month
+                const overlapStart = start > startOfMonth ? start : startOfMonth;
+                const overlapEnd = end < endOfMonth ? end : endOfMonth;
+
+                if (overlapEnd >= overlapStart) {
+                    const days = (overlapEnd - overlapStart) / (1000 * 60 * 60 * 24) + 1;
+                    total += days;
+                }
+            }
+        });
+        setLeavesTakenThisMonth(total);
     };
 
     const markAttendance = async (type) => {
@@ -175,6 +206,14 @@ const DashboardEmployee = () => {
                     {/* Leave Request Section */}
                     <div className="bg-white p-6 rounded-lg shadow-lg">
                         <h2 className="text-xl font-bold mb-4">Apply for Leave</h2>
+
+                        {leavesTakenThisMonth >= MAX_LEAVES_PER_MONTH && (
+                            <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-4" role="alert">
+                                <p className="font-bold">Leave Limit Reached</p>
+                                <p>You have already applied for {Math.round(leavesTakenThisMonth)} days of leave this month. You cannot apply for more.</p>
+                            </div>
+                        )}
+
                         <form onSubmit={submitLeave}>
                             <div className="mb-2">
                                 <label className="block text-sm">Type</label>
@@ -185,6 +224,7 @@ const DashboardEmployee = () => {
                                 >
                                     <option>Sick</option>
                                     <option>Casual</option>
+                                    <option>Emergency</option>
                                     <option>Vacation</option>
                                     <option>Other</option>
                                 </select>
@@ -220,7 +260,12 @@ const DashboardEmployee = () => {
                                     required
                                 />
                             </div>
-                            <button className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700">Submit Request</button>
+                            <button
+                                className={`w-full text-white py-2 rounded ${leavesTakenThisMonth >= MAX_LEAVES_PER_MONTH ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
+                                disabled={leavesTakenThisMonth >= MAX_LEAVES_PER_MONTH}
+                            >
+                                {leavesTakenThisMonth >= MAX_LEAVES_PER_MONTH ? 'Limit Reached' : 'Submit Request'}
+                            </button>
                         </form>
                     </div>
 
@@ -292,7 +337,12 @@ const DashboardEmployee = () => {
                         {payroll && payroll.status === 'Processed' ? (
                             <div className="bg-green-100 border-l-4 border-green-500 text-green-700 p-4" role="alert">
                                 <p className="font-bold">Payment Processed</p>
-                                <p>Your salary of ₹{payroll.salary} has been processed on {new Date(payroll.lastProcessed).toLocaleDateString()}. It will be credited to your account within 2 days.</p>
+                                <div className="mt-2 text-sm">
+                                    <p>Base Salary: ₹{payroll.salary}</p>
+                                    <p className="text-red-600">Deductions: -₹{payroll.deductions}</p>
+                                    <p className="border-t pt-1 mt-1 font-bold text-lg">Net Salary: ₹{payroll.netSalary}</p>
+                                    <p className="text-xs text-gray-500 mt-1">Processed on {new Date(payroll.lastProcessed).toLocaleDateString()}</p>
+                                </div>
                             </div>
                         ) : (
                             <div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4" role="alert">

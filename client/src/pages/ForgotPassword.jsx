@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import axios from 'axios';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 import config from '../config';
 
 const ForgotPassword = () => {
     const [email, setEmail] = useState('');
+    const navigate = useNavigate();
     const [message, setMessage] = useState('');
     const [error, setError] = useState('');
 
@@ -15,7 +16,10 @@ const ForgotPassword = () => {
         setError('');
         try {
             await axios.post(`${config.API_URL}/api/auth/forgot-password`, { email });
-            setMessage('Reset password link sent to your email.');
+            setMessage('Reset password OTP sent to your email.');
+            setTimeout(() => {
+                navigate('/reset-password', { state: { email } });
+            }, 2000);
         } catch (err) {
             setError(err.response?.data?.msg || 'Something went wrong');
         }

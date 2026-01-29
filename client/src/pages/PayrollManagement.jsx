@@ -36,6 +36,21 @@ const PayrollManagement = () => {
         }
     };
 
+    const resetPayment = async (id, name) => {
+        if (!window.confirm(`Are you sure you want to reset payment for ${name} to PENDING? This will clear current calculations.`)) return;
+        try {
+            const token = localStorage.getItem('token');
+            await axios.post(`${config.API_URL}/api/payroll/reset/${id}`, {}, {
+                headers: { 'x-auth-token': token }
+            });
+            alert('Payment Status Reset to Pending');
+            fetchPayroll();
+        } catch (err) {
+            console.error(err);
+            alert('Error resetting payment status');
+        }
+    };
+
     const updateSalary = async (id, currentSalary) => {
         const newSalary = window.prompt("Enter new salary:", currentSalary);
         if (!newSalary || isNaN(newSalary)) return;
@@ -61,6 +76,9 @@ const PayrollManagement = () => {
                         <tr className="bg-gray-100">
                             <th className="px-4 py-2 text-left">Employee</th>
                             <th className="px-4 py-2 text-left">Base Salary</th>
+                            <th className="px-4 py-2 text-left">Deductions</th>
+                            <th className="px-4 py-2 text-left">Net Salary</th>
+                            <th className="px-4 py-2 text-left">Attendance</th>
                             <th className="px-4 py-2 text-left">Status</th>
                             <th className="px-4 py-2 text-left">Last Processed</th>
                             <th className="px-4 py-2 text-left">Action</th>
@@ -71,6 +89,9 @@ const PayrollManagement = () => {
                             <tr key={emp._id} className="border-b">
                                 <td className="px-4 py-2">{emp.user?.name}</td>
                                 <td className="px-4 py-2">₹{emp.salary}</td>
+                                <td className="px-4 py-2 text-red-500">₹{emp.deductions || 0}</td>
+                                <td className="px-4 py-2 font-bold">₹{emp.netSalary || 0}</td>
+                                <td className="px-4 py-2">{emp.attendanceDays || 0} Days</td>
                                 <td className="px-4 py-2">
                                     <span className={`px-2 py-1 rounded text-xs text-white ${emp.status === 'Processed' ? 'bg-green-500' : 'bg-yellow-500'}`}>
                                         {emp.status}
@@ -88,8 +109,11 @@ const PayrollManagement = () => {
                                             Process Payment
                                         </button>
                                     ) : (
-                                        <button className="bg-gray-400 text-white px-3 py-1 rounded cursor-not-allowed text-xs" disabled>
-                                            Paid
+                                        <button
+                                            onClick={() => resetPayment(emp._id, emp.user?.name)}
+                                            className="bg-orange-500 text-white px-3 py-1 rounded hover:bg-orange-600 text-xs"
+                                        >
+                                            Reset to Pending
                                         </button>
                                     )}
                                     <button

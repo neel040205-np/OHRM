@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import ImageModal from '../components/ImageModal';
 import config from '../config';
+import ImageModal from '../components/ImageModal';
+import Payslip from '../components/Payslip'; // Import Payslip
 
 const DashboardEmployee = () => {
     const navigate = useNavigate();
@@ -20,6 +21,8 @@ const DashboardEmployee = () => {
     const [modalOpen, setModalOpen] = useState(false);
     const [selectedImage, setSelectedImage] = useState('');
     const [leavesTakenThisMonth, setLeavesTakenThisMonth] = useState(0);
+    const [holidays, setHolidays] = useState([]);
+    const [showPayslip, setShowPayslip] = useState(false); // State for Payslip Modal
 
     const MAX_LEAVES_PER_MONTH = 5;
 
@@ -28,7 +31,20 @@ const DashboardEmployee = () => {
         fetchLeaves();
         fetchNotices();
         fetchPayrollStatus(); // New Call
+        fetchHolidays();
     }, []);
+
+    const fetchHolidays = async () => {
+        try {
+            const token = localStorage.getItem('token');
+            const res = await axios.get(`${config.API_URL}/api/holidays?upcoming=true`, {
+                headers: { 'x-auth-token': token }
+            });
+            setHolidays(res.data);
+        } catch (err) {
+            console.error(err);
+        }
+    };
 
     const fetchPayrollStatus = async () => {
         try {
@@ -226,6 +242,7 @@ const DashboardEmployee = () => {
                                     <option>Casual</option>
                                     <option>Emergency</option>
                                     <option>Vacation</option>
+                                    <option>Office</option>
                                     <option>Other</option>
                                 </select>
                             </div>
@@ -269,8 +286,27 @@ const DashboardEmployee = () => {
                         </form>
                     </div>
 
+                    {/* Holidays Section */}
+                    <div className="bg-white p-6 rounded-lg shadow-lg">
+                        <h2 className="text-xl font-bold mb-4">Upcoming Holidays</h2>
+                        <div className="overflow-y-auto h-40">
+                            {holidays.length > 0 ? (
+                                <ul className="space-y-2">
+                                    {holidays.map(h => (
+                                        <li key={h._id} className="flex justify-between border-b pb-1">
+                                            <span className="font-medium text-gray-700">{h.name}</span>
+                                            <span className="text-gray-500">{new Date(h.date).toLocaleDateString()}</span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            ) : (
+                                <p className="text-gray-500 italic">No holidays found.</p>
+                            )}
+                        </div>
+                    </div>
+
                     {/* Notices Section */}
-                    <div className="bg-white p-6 rounded-lg shadow-lg md:col-span-2">
+                    <div className="bg-white p-6 rounded-lg shadow-lg">
                         <h2 className="text-xl font-bold mb-4">Notice Board</h2>
                         <div className="space-y-4">
                             {notices.map(notice => (
@@ -333,7 +369,17 @@ const DashboardEmployee = () => {
 
                     {/* Payroll Status Section */}
                     <div className="bg-white p-6 rounded-lg shadow-lg md:col-span-2">
-                        <h2 className="text-xl font-bold mb-4">Payroll Status</h2>
+                        <div className="flex justify-between items-center mb-4">
+                            <h2 className="text-xl font-bold">Payroll Status</h2>
+                            {payroll && payroll.status === 'Processed' && (
+                                <button
+                                    onClick={() => setShowPayslip(true)}
+                                    className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 text-sm font-bold shadow"
+                                >
+                                    View Payslip
+                                </button>
+                            )}
+                        </div>
                         {payroll && payroll.status === 'Processed' ? (
                             <div className="bg-green-100 border-l-4 border-green-500 text-green-700 p-4" role="alert">
                                 <p className="font-bold">Payment Processed</p>
@@ -342,6 +388,7 @@ const DashboardEmployee = () => {
                                     <p className="text-red-600">Deductions: -₹{payroll.deductions}</p>
                                     <p className="border-t pt-1 mt-1 font-bold text-lg">Net Salary: ₹{payroll.netSalary}</p>
                                     <p className="text-xs text-gray-500 mt-1">Processed on {new Date(payroll.lastProcessed).toLocaleDateString()}</p>
+                                    <p className="text-xs text-gray-500 mt-1">For Month: {payroll.payMonth || 'N/A'}</p>
                                 </div>
                             </div>
                         ) : (
@@ -356,6 +403,15 @@ const DashboardEmployee = () => {
                         onClose={() => setModalOpen(false)}
                         imageUrl={selectedImage}
                     />
+
+                    {/* Render Payslip Modal */}
+                    {showPayslip && (
+                        <Payslip
+                            payroll={payroll}
+                            employee={payroll.user}
+                            onClose={() => setShowPayslip(false)}
+                        />
+                    )}
                 </div>
             </div>
         </div>

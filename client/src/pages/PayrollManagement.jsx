@@ -4,6 +4,8 @@ import config from '../config';
 
 const PayrollManagement = () => {
     const [employees, setEmployees] = useState([]);
+    const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1); // Default current
+    const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
 
     useEffect(() => {
         fetchPayroll();
@@ -22,10 +24,13 @@ const PayrollManagement = () => {
     };
 
     const processPayment = async (id, name) => {
-        if (!window.confirm(`Confirm payment processing for ${name}?`)) return;
+        if (!window.confirm(`Confirm payment processing for ${name} for ${selectedMonth}/${selectedYear}?`)) return;
         try {
             const token = localStorage.getItem('token');
-            await axios.post(`${config.API_URL}/api/payroll/process/${id}`, {}, {
+            await axios.post(`${config.API_URL}/api/payroll/process/${id}`, {
+                month: selectedMonth,
+                year: selectedYear
+            }, {
                 headers: { 'x-auth-token': token }
             });
             alert('Payment Processed Successfully');
@@ -70,6 +75,31 @@ const PayrollManagement = () => {
     return (
         <div className="bg-white p-6 rounded-lg shadow-lg">
             <h2 className="text-xl font-bold mb-4">Payroll Management</h2>
+
+            <div className="flex gap-4 mb-4">
+                <div>
+                    <label className="block text-sm font-medium text-gray-700">Month</label>
+                    <select
+                        value={selectedMonth}
+                        onChange={(e) => setSelectedMonth(parseInt(e.target.value))}
+                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
+                    >
+                        {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+                            <option key={m} value={m}>{new Date(0, m - 1).toLocaleString('default', { month: 'long' })}</option>
+                        ))}
+                    </select>
+                </div>
+                <div>
+                    <label className="block text-sm font-medium text-gray-700">Year</label>
+                    <input
+                        type="number"
+                        value={selectedYear}
+                        onChange={(e) => setSelectedYear(parseInt(e.target.value))}
+                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 w-24"
+                    />
+                </div>
+            </div>
+
             <div className="overflow-x-auto">
                 <table className="min-w-full text-sm">
                     <thead>

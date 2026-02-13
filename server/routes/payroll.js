@@ -44,25 +44,67 @@ router.post('/process/:id', auth, async (req, res) => {
         if (!payroll) return res.status(404).json({ msg: 'Record not found' });
 
         const userId = payroll.user;
-        const previousMonthDate = new Date();
-        previousMonthDate.setMonth(previousMonthDate.getMonth() - 1);
 
-        // Define Month Start and End (For the current calculation, let's assume we are calculating for the current month or previous? Usually payroll is for past month. Let's use request body or default to current month for simplicity of testing).
-        // Better: Use a query param or body for month. Default: Current Month.
-        const now = new Date();
-        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        // Use current date to determine the month to process (or pass via body)
+        // For simplicity, defaulting to current month logic as before, but improved
+        let now = new Date();
+        let year = now.getFullYear();
+        let month = now.getMonth(); // 0-indexed
 
-        // 1. Fetch Attendance (Count Present Days)
+        if (req.body.year && req.body.month) {
+            year = parseInt(req.body.year);
+            month = parseInt(req.body.month) - 1;
+        }
+
+        const startOfMonth = new Date(year, month, 1);
+        const endOfMonth = new Date(year, month + 1, 0); // Last day of month
+
+        // 1. Calculate Total Days in Month
+        const totalDaysInMonth = endOfMonth.getDate();
+
+        // 2. Calculate Weekends (Saturdays and Sundays)
+        let weekends = 0;
+        for (let d = new Date(startOfMonth); d <= endOfMonth; d.setDate(d.getDate() + 1)) {
+            const day = d.getDay();
+            if (day === 0 || day === 6) { // 0 Sun, 6 Sat
+                weekends++;
+            }
+        }
+
+        // 3. Fetch Holidays for this month
+        const Holiday = require('../models/Holiday');
+        const holidays = await Holiday.find({
+            date: { $gte: startOfMonth, $lte: endOfMonth }
+        });
+
+        // Filter out holidays that fall on weekends to avoid double counting
+        let effectiveHolidays = 0;
+        holidays.forEach(h => {
+            const day = new Date(h.date).getDay();
+            if (day !== 0 && day !== 6) {
+                effectiveHolidays++;
+            }
+        });
+
+        // 4. Calculate Working Days
+        const workingDays = totalDaysInMonth - weekends - effectiveHolidays;
+
+        // 5. Fetch Attendance (Present Days)
         const attendanceRecords = await Attendance.find({
             user: userId,
             date: { $gte: startOfMonth, $lte: endOfMonth },
-            status: 'Present' // Assuming 'Present' counts as full day
+            status: { $in: ['Present', 'Half-day'] } // Considering Half-day
         });
-        const presentDays = attendanceRecords.length;
 
-        // 2. Fetch Approved Leaves (Overlapping with this month)
-        // Overlap Condition: StartDate <= EndOfMonth AND EndDate >= StartOfMonth
+        // Calculate Present Days (Half-day counts as 0.5? or 1? Let's assume 1 for now or 0.5 if strict)
+        // User didn't specify Half-day logic, so assuming Present count.
+        let presentDays = 0;
+        attendanceRecords.forEach(att => {
+            if (att.status === 'Half-day') presentDays += 0.5;
+            else presentDays += 1;
+        });
+
+        // 6. Fetch Approved Leaves
         const leaveRecords = await Leave.find({
             user: userId,
             status: 'Approved',
@@ -70,116 +112,96 @@ router.post('/process/:id', auth, async (req, res) => {
             endDate: { $gte: startOfMonth }
         });
 
-        // Calculate total leave days taken by type
-        let sickLeaves = 0;
-        let casualLeaves = 0;
-        let emergencyLeaves = 0;
-        let otherLeaves = 0;
+        let paidLeafDays = 0; // Medical, Office (fully paid)
+        let otherLeafDays = 0; // Casual, Emergency, Other (subject to deduction or quota)
 
         leaveRecords.forEach(leave => {
             const s = new Date(leave.startDate);
             const e = new Date(leave.endDate);
 
-            // Clamping dates to current month range
+            // Interface with month boundaries
             const overlapStart = s > startOfMonth ? s : startOfMonth;
             const overlapEnd = e < endOfMonth ? e : endOfMonth;
 
-            // Calculate days only within this month
-            let days = 0;
-            if (overlapEnd >= overlapStart) {
-                days = (overlapEnd - overlapStart) / (1000 * 60 * 60 * 24) + 1;
-            }
+            // Iterate days to check if they are working days (skip weekends/holidays)
+            // Leaves usually span consecutive days including weekends, but for PAYROLL, 
+            // we usually care if they missed a WORKING day.
+            // If I take leave Mon-Sun (7 days), and Sat/Sun are off, I missed 5 working days.
 
-            if (leave.leaveType === 'Sick') sickLeaves += days;
-            else if (leave.leaveType === 'Casual') casualLeaves += days;
-            else if (leave.leaveType === 'Emergency') emergencyLeaves += days;
-            else otherLeaves += days;
+            for (let d = new Date(overlapStart); d <= overlapEnd; d.setDate(d.getDate() + 1)) {
+                const day = d.getDay();
+                // Check if it's a weekend
+                if (day === 0 || day === 6) continue;
+
+                // Check if it's a holiday
+                const isHoliday = holidays.some(h => {
+                    const hDate = new Date(h.date);
+                    return hDate.getDate() === d.getDate() && hDate.getMonth() === d.getMonth();
+                });
+                if (isHoliday) continue;
+
+                // If it is a working day, count it as a leave day
+                if (leave.leaveType === 'Sick' || leave.leaveType === 'Office') {
+                    // Medical (Sick) or Office -> Paid
+                    paidLeafDays++;
+                } else {
+                    // Casual, Emergency, Other, Vacation -> Potential Deduction
+                    otherLeafDays++;
+                }
+            }
         });
 
-        // 3. Define Quotas
-        const MAX_SICK = 2;
-        const MAX_CASUAL = 1;
-        const MAX_EMERGENCY = 2; // Approved by HR usually
-        const MAX_ALLOWED_LEAVES = 5; // Total max? The prompt says "he can have maximum 5 leaves".
+        // 7. Calculate Chargeable Absences
+        // A user is expected to be present on 'workingDays'.
+        // They were present for 'presentDays'.
+        // They had 'paidLeafDays' (credited as present).
+        // They had 'otherLeafDays'.
 
-        // Calculate Valid Leaves (Count towards "Present" for salary)
-        // Note: Emergency and Casual are approved by HR, so if they are in 'Approved' state here, they are valid.
-        // However, we must ensure they don't exceed limits.
-        // If they exceed limits, they become 'Unpaid' or 'Deducted'.
+        // Quota Logic: "if he gets any extra leaves then salary should be deducted"
+        // Interpretation: 
+        // Medical/Office = Unlimited Paid (within reason, logic says "salary should not be deducted")
+        // Others = User didn't specify a FREE quota in this specific prompt, but in previous code there was MAX_SICK, MAX_CASUAL.
+        // The prompt says "if he gets any extra leaves". This implies there might be a quota. 
+        // However, to strictly follow "extras... deducted on salary/30", and lacking specific quota numbers in this prompt:
+        // I will assume ALL "other" leaves are "extra" if strictly following "working days - present". 
+        // OR better: I will assume a standard small quota (e.g., 1 Casual) fits "extra".
+        // BUT, given the strict "salary/30" instruction for "extra", let's assume valid paid leaves are ONLY Medical/Office/Approved-Quota.
 
-        let validLeaves = 0;
+        // Let's bring back the quotas for "Other" types if we want to be generous, 
+        // OR simply treat Medical/Office as the ONLY free ones if we want to be strict to the "extra" wording.
+        // Let's assume standard Quota for Casual is 1, Emergency 2. Excess is deducted.
 
-        // Count valid sick leaves
-        const validSick = Math.min(sickLeaves, MAX_SICK);
+        const MAX_CASUAL_ALLOWED = 1;
+        const MAX_EMERGENCY_ALLOWED = 0; // Let's simplify: Only Medical/Office are fully safe?
+        // Actually, the user said "if he is given medical leaves or office leaves... salary should not be deducted but if he gets any extra leaves then salary should be deducted".
+        // This phrasing suggests ONLY Medical/Office are safe. "Extra" likely refers to anything else (Casual/Vacation/etc).
+        // So I will count ALL 'otherLeafDays' as 'extra' unless I want to be nice. 
+        // Lets be safe: Medical/Office = Safe. Others = Deducted (Paid Quota = 0 for them).
 
-        // Count valid casual
-        const validCasual = Math.min(casualLeaves, MAX_CASUAL);
+        // Days Accounted For = Present + Paid Leaves (Medical/Office)
 
-        // Count valid emergency
-        const validEmergency = Math.min(emergencyLeaves, MAX_EMERGENCY);
+        // Unaccounted Days = Working Days - (Present + Paid Leaves)
+        // These unaccounted days include "Other Leaves" and "Unexplained Absences".
 
-        // Sum valid specific leaves
-        let totalValidSpecific = validSick + validCasual + validEmergency;
+        let chargeableDays = workingDays - (presentDays + paidLeafDays);
 
-        // Check overall cap of 5
-        if (totalValidSpecific > MAX_ALLOWED_LEAVES) {
-            totalValidSpecific = MAX_ALLOWED_LEAVES;
-        }
+        // Now, 'chargeableDays' should theoretically equal 'otherLeafDays' + 'AbsentWithoutLeave'.
+        // If chargeableDays < 0, it means they worked extra or data issue.
+        if (chargeableDays < 0) chargeableDays = 0;
 
-        validLeaves = totalValidSpecific;
-
-        // 4. Calculate Absences
-        // Calculate Total Working Days in Month (excluding weekends possibly? Prompt says "monday to friday". Assuming 5 day work week).
-        let workingDays = 0;
-        for (let d = new Date(startOfMonth); d <= endOfMonth; d.setDate(d.getDate() + 1)) {
-            const day = d.getDay();
-            if (day !== 0 && day !== 6) { // 0 Sun, 6 Sat
-                workingDays++;
-            }
-        }
-
-        // Unaccounted Absences = Working Days - (Present + Valid Leaves)
-        // Note: If user didn't mark attendance and didn't apply for leave, it's Absent.
-        // Also if user took 'Other' leave or exceeded quotas, those are effectively Absent/Unpaid.
-
-        let chargeableAbsences = workingDays - (presentDays + validLeaves);
-        if (chargeableAbsences < 0) chargeableAbsences = 0; // Should not happen
-
-        // 5. Apply Grace Period - REMOVED per user request (User wants 1 absent day = 1 day salary cut immediately)
-        // if (chargeableAbsences > 0) {
-        //     chargeableAbsences = chargeableAbsences - 1;
-        // }
-
-        // 6. Calculate Deduction
-        let deduction = 0;
+        // 8. Calculate Deduction
         const baseSalary = payroll.salary;
-        const dailySalary = baseSalary / 30; // Prompt: "total salary/30"
+        const dailySalary = baseSalary / 30; // "salary/30 format"
 
-        if (chargeableAbsences > 0) {
-            // Day 1 Deduction
-            deduction += dailySalary;
-
-            // Remaining Days Deduction
-            if (chargeableAbsences > 1) {
-                const remainingDays = chargeableAbsences - 1;
-                // User Formula for Day 2+: (salary/30) * 5% (Interpret as: Daily Salary + 5% Surcharge on Daily)
-                // or just the surcharge? Context "deduction should be..." implies the total deduction.
-                // Assuming "Heavy Penalty" logic is relaxing to "Daily + 5% of Daily".
-                const penaltyPerDay = dailySalary + (dailySalary * 0.05);
-                deduction += remainingDays * penaltyPerDay;
-            }
-        }
-
-        // 7. Update Net Salary
-        // Ensure deduction doesn't exceed salary? (Optional check)
+        const deduction = chargeableDays * dailySalary;
         const netSalary = Math.max(0, baseSalary - deduction);
 
         payroll.status = 'Processed';
         payroll.lastProcessed = Date.now();
         payroll.deductions = Math.round(deduction);
         payroll.netSalary = Math.round(netSalary);
-        payroll.attendanceDays = presentDays;
-        payroll.payMonth = `${now.getMonth() + 1}-${now.getFullYear()}`; // e.g. "1-2026"
+        payroll.attendanceDays = presentDays; // Actual physical presence
+        payroll.payMonth = `${month + 1}-${year}`;
 
         await payroll.save();
         res.json(payroll);
@@ -239,10 +261,12 @@ router.get('/my-status', auth, async (req, res) => {
     try {
         let payroll = await Payroll.findOne({ user: req.user.id });
         if (!payroll) {
-            // Create if not exists (though HR view usually creates it)
+            // Create pending if not exists
             payroll = new Payroll({ user: req.user.id });
             await payroll.save();
         }
+
+        await payroll.populate('user', ['name', 'email', 'role']);
         res.json(payroll);
     } catch (err) {
         console.error(err.message);

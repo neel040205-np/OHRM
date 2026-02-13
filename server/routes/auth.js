@@ -154,6 +154,18 @@ router.post('/reset-password', async (req, res) => {
 
         await user.save();
 
+        // Send confirmation email
+        try {
+            await sendEmail({
+                email: user.email,
+                subject: 'Password Reset Successful',
+                message: 'Your password has been successfully reset. You can now login with your new password.'
+            });
+        } catch (emailErr) {
+            console.error('Failed to send confirmation email:', emailErr);
+            // Don't fail the request if email fails, as password is already reset
+        }
+
         res.status(200).json({ success: true, data: 'Password updated success' });
     } catch (err) {
         console.error(err.message);

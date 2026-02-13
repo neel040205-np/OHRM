@@ -111,6 +111,27 @@ const ResetPassword = () => {
                             Reset Password
                         </button>
                     </div>
+
+                    {error && (
+                        <div className="text-center">
+                            <button
+                                type="button"
+                                onClick={async () => {
+                                    setMessage('');
+                                    setError('');
+                                    try {
+                                        await axios.post(`${config.API_URL}/api/auth/forgot-password`, { email });
+                                        setMessage('A new OTP has been sent to your email.');
+                                    } catch (err) {
+                                        setError(err.response?.data?.msg || 'Failed to resend OTP.');
+                                    }
+                                }}
+                                className="text-sm text-blue-500 hover:text-blue-800 focus:outline-none"
+                            >
+                                Resend OTP
+                            </button>
+                        </div>
+                    )}
                 </form>
             </div>
         </div>

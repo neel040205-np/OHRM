@@ -19,11 +19,12 @@ mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/ohrm')
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));
-app.use('/api/leaves', require('./routes/leaves'));
-app.use('/api/attendance', require('./routes/attendance'));
 app.use('/api/employees', require('./routes/employees'));
-app.use('/api/notices', require('./routes/notices'));
+app.use('/api/attendance', require('./routes/attendance'));
+app.use('/api/leaves', require('./routes/leaves'));
 app.use('/api/payroll', require('./routes/payroll'));
+app.use('/api/notices', require('./routes/notices'));
+app.use('/api/holidays', require('./routes/holidays'));
 
 app.get('/', (req, res) => {
     res.send('OHRM Server is running');
